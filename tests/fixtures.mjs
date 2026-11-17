@@ -1,13 +1,17 @@
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { FRONTEND, BACKEND } from '../src/environment.mjs';
 import { contains } from '../src/environment.mjs';
 
+// Windows runners may expose TEMP as an 8.3 alias; fixtures must use the same
+// canonical path form returned by environment inspection and saved in config.
+const temporaryRoot = await realpath(tmpdir());
+
 export function assertTemporaryPath(target, root) {
   const resolvedRoot = path.resolve(root);
-  if (path.dirname(resolvedRoot) !== path.resolve(tmpdir()) || !path.basename(resolvedRoot).startsWith('baicaigaga-') || !contains(resolvedRoot, path.resolve(target))) {
+  if (path.dirname(resolvedRoot) !== temporaryRoot || !path.basename(resolvedRoot).startsWith('baicaigaga-') || !contains(resolvedRoot, path.resolve(target))) {
     throw new Error(`Refusing filesystem operation outside fixture: ${target}`);
   }
 }
@@ -21,7 +25,7 @@ export function command(directory, ...args) {
 }
 
 export async function temporary(t) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'baicaigaga-'));
+  const directory = await mkdtemp(path.join(temporaryRoot, 'baicaigaga-'));
   t.after(() => {
     assertTemporaryPath(directory, directory);
     return rm(directory, { recursive: true, force: true });
