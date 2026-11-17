@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, rename, rm, stat } from 'node:fs/promises';
+import { readFile, rename, rm, stat, chmod } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { temporary, environment, repository, commitVersion, command, write, assertTemporaryPath } from './fixtures.mjs';
@@ -95,7 +95,8 @@ test('安装拒绝覆盖不属于助手的入口文件', async t => {
 
 test('命令入口使用绝对解释器及路径，支持引号和空格并可重复安装', async t => {
   const home = await temporary(t);
-  await write(home, 'bin/sh', 'fixture shell');
+  await write(home, 'bin/sh', '#!/bin/sh\nexec /bin/sh "$@"\n');
+  await chmod(path.join(home, 'bin', 'sh'), 0o755);
   const helper = path.join(home, "helper with ' quote");
   await write(helper, 'package.json', { name: 'baicaigaga', version: '0.1.0' });
   await write(helper, 'bin/baicaigaga.mjs', 'console.log(JSON.stringify(process.argv.slice(2)));');
