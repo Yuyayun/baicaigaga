@@ -1,4 +1,4 @@
-import { createInterface } from 'node:readline';
+import { createInterface, cursorTo, clearScreenDown } from 'node:readline';
 import { realpath } from 'node:fs/promises';
 import os from 'node:os';
 import { inspectEnvironment, discover, configPath, readConfig, saveConfig, expandHome, assertIndependent } from './environment.mjs';
@@ -10,17 +10,53 @@ class Exit extends Error {}
 export class Prompt {
   constructor(input = process.stdin, output = process.stdout, onInterrupt = () => {}) {
     this.output = output;
-    this.reader = createInterface({ input, output, terminal: Boolean(input.isTTY && output.isTTY), crlfDelay: Infinity });
+    this.terminal = Boolean(input.isTTY && output.isTTY && process.env.TERM !== 'dumb');
+    this.temporaryScreen = false;
+    this.reader = createInterface({ input, output, terminal: this.terminal, crlfDelay: Infinity });
+    this.reader.setPrompt('');
     this.iterator = this.reader[Symbol.asyncIterator]();
-    this.reader.on('SIGINT', () => { onInterrupt(); this.reader.close(); });
+    this.reader.on('SIGINT', () => { onInterrupt(); this.close(); });
   }
   async ask(question) {
-    this.output.write(question);
+    if (this.terminal) {
+      this.reader.setPrompt(question);
+      this.reader.prompt();
+    } else this.output.write(question);
     const answer = await this.iterator.next();
     if (answer.done) throw new Exit();
     return answer.value.trim();
   }
-  close() { this.reader.close(); }
+  async menu(render, { accept, invalid, question = '请选择：' }) {
+    if (this.temporaryScreen) throw new Error('不能嵌套显示临时菜单');
+    try {
+      if (this.terminal) {
+        // Alternate screens preserve the operation transcript without counting
+        // wrapped rows, including Chinese text and menus taller than the viewport.
+        this.temporaryScreen = true;
+        this.output.write('\x1b[?1049h');
+        cursorTo(this.output, 0, 0);
+        clearScreenDown(this.output);
+      }
+      await render();
+      for (;;) {
+        const value = await this.ask(question);
+        if (accept(value)) return value;
+        this.output.write(`${invalid}\n`);
+      }
+    } finally {
+      this.restoreScreen();
+    }
+  }
+  restoreScreen() {
+    if (this.temporaryScreen) {
+      this.temporaryScreen = false;
+      this.output.write('\x1b[?1049l');
+    }
+  }
+  async waitForReturn() {
+    if (this.terminal) await this.ask('\n按回车返回主菜单：');
+  }
+  close() { this.restoreScreen(); this.reader.close(); }
 }
 
 export async function locate({ helper, prompt, print, home, cwd, file, useSaved = true }) {
@@ -106,21 +142,21 @@ async function selectBranch(environment, prompt, print) {
   print('正在检查工作区并获取 origin 远端分支……');
   const choices = await listBranches(environment.backend);
   if (!choices.length) throw new UserError('仓库中没有可用分支。');
-  print('\n请选择后端分支：\n');
-  choices.forEach((item, index) => print(`${index + 1}. ${plain(item.name)}${item.current ? '  ← 当前' : ''}${!item.local ? '  （远端，将建立本地跟踪分支）' : !item.remote ? '  （本地）' : ''}`));
-  print('\n0. 返回');
-  for (;;) {
-    const value = await prompt.ask('请选择：');
-    if (value === '0') return;
-    const index = numericChoice(value, choices.length);
-    if (index === null) { print('请输入列表中的编号或 0。'); continue; }
-    const result = await switchBranch(environment.backend, choices[index]);
-    print(`\n✓ 已切换至 ${plain(result.branch)}\n✓ 当前版本：${plain(result.version)}\n✓ 工作区干净`);
-    if (result.ahead) print('提示：本地分支领先远端，已保留本地提交。');
-    if (result.missingUpstream) print('提示：原上游分支已不存在，已切换到保留的本地分支。');
-    print('\n请重启 SillyTavern 后进行测试。');
-    return;
-  }
+  const value = await prompt.menu(() => {
+    print('\n请选择后端分支：\n');
+    choices.forEach((item, index) => print(`${index + 1}. ${plain(item.name)}${item.current ? '  ← 当前' : ''}${!item.local ? '  （远端，将建立本地跟踪分支）' : !item.remote ? '  （本地）' : ''}`));
+    print('\n0. 返回');
+  }, {
+    accept: value => value === '0' || numericChoice(value, choices.length) !== null,
+    invalid: '请输入列表中的编号或 0。',
+  });
+  if (value === '0') return false;
+  const result = await switchBranch(environment.backend, choices[numericChoice(value, choices.length)]);
+  print(`\n✓ 已切换至 ${plain(result.branch)}\n✓ 当前版本：${plain(result.version)}\n✓ 工作区干净`);
+  if (result.ahead) print('提示：本地分支领先远端，已保留本地提交。');
+  if (result.missingUpstream) print('提示：原上游分支已不存在，已切换到保留的本地分支。');
+  print('\n请重启 SillyTavern 后进行测试。');
+  return true;
 }
 
 export async function run(options = {}) {
@@ -140,12 +176,15 @@ async function runSession({ helper, home = os.homedir(), cwd = process.cwd(), in
     let environment = await locate({ helper, prompt, print, home, cwd, file });
     for (;;) {
       if (controller.signal.aborted) throw new Exit();
-      environment = await showStatus(environment, print);
-      print('\n1. 切换后端分支\n2. 更新测试助手\n3. 重新定位 SillyTavern\n0. 退出\n');
-      const choice = await prompt.ask('请选择：');
+      const choice = await prompt.menu(async () => {
+        environment = await showStatus(environment, print);
+        if (controller.signal.aborted) throw new Exit();
+        print('\n1. 切换后端分支\n2. 更新测试助手\n3. 重新定位 SillyTavern\n0. 退出\n');
+      }, { accept: value => ['0', '1', '2', '3'].includes(value), invalid: '请输入 0、1、2 或 3。' });
       if (choice === '0') break;
+      let showResult = false;
       try {
-        if (choice === '1') await selectBranch(environment, prompt, print);
+        if (choice === '1') showResult = await selectBranch(environment, prompt, print);
         else if (choice === '2') {
           print('正在检查助手自身工作区并获取正式分支……');
           const result = await updateHelper(helper);
@@ -155,15 +194,19 @@ async function runSession({ helper, home = os.homedir(), cwd = process.cwd(), in
             break;
           }
           print('当前已是最新版本');
+          showResult = true;
         } else if (choice === '3') {
           const found = await locate({ helper, prompt, print, home, cwd, file, useSaved: false });
           if (found) environment = found;
-        } else print('请输入 0、1、2 或 3。');
+          showResult = Boolean(found);
+        }
       } catch (error) {
         if (controller.signal.aborted) throw new Exit();
         if (error instanceof Exit) throw error;
         print(`\n${describe(error)}`);
+        showResult = true;
       }
+      if (showResult) await prompt.waitForReturn();
     }
   } catch (error) {
     if (!(error instanceof Exit) && !controller.signal.aborted) throw error;

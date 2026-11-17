@@ -30,7 +30,8 @@ async function invoke({ helper = actualHelper, home, input }) {
 
 test('帮助和版本命令直接结束，不进入环境搜索', async () => {
   const version = await execute(process.execPath, [entry, '--version']);
-  assert.equal(version.stdout.trim(), '0.1.0');
+  const expected = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
+  assert.equal(version.stdout.trim(), expected);
   const help = await execute(process.execPath, [entry, '--help']);
   assert.match(help.stdout, /打开交互菜单/);
   assert.doesNotMatch(help.stdout, /正在检查/);
@@ -42,6 +43,7 @@ test('无酒馆时可跳过定位并正常退出，EOF 也完全结束进程', a
   assert.equal(result.code, 0);
   assert.match(result.stdout, /尚未定位/);
   assert.match(result.stdout, /助手已退出/);
+  assert.doesNotMatch(result.stdout, /\x1b|按回车返回主菜单/);
   const eof = await invoke({ home, input: '' });
   assert.equal(eof.code, 0);
   assert.match(eof.stdout, /助手已退出/);
@@ -67,6 +69,8 @@ test('完整菜单切换分支后退出，前端和数据文件保持原样', as
   assert.match(result.stdout, /已切换至 test/);
   assert.match(result.stdout, /当前版本：1.0.2/);
   assert.match(result.stdout, /请重启 SillyTavern/);
+  assert.doesNotMatch(result.stdout, /\x1b|按回车返回主菜单/);
+  assert.match(result.stdout, /分支：test\n版本：1.0.2/);
   assert.equal(command(env.backend, 'branch', '--show-current'), 'test');
   assert.equal(await readFile(frontendFile, 'utf8'), before);
   assert.equal(await readFile(path.join(env.root, 'data/chats/sentinel.jsonl'), 'utf8'), 'KEEP CHAT\n');
