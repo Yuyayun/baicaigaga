@@ -1,4 +1,4 @@
-import { readFile, realpath, readdir, stat, mkdir, writeFile, rename, unlink } from 'node:fs/promises';
+import { readFile, realpath, readdir, stat, lstat, mkdir, writeFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -24,19 +24,36 @@ export function expandHome(input, home = os.homedir()) {
 export async function inspectEnvironment(candidate) {
   try {
     const root = await realpath(candidate);
-    const frontend = await realpath(path.join(root, FRONTEND));
-    const backend = await realpath(path.join(root, BACKEND));
-    if (!contains(root, frontend) || !contains(root, backend) || contains(frontend, backend) || contains(backend, frontend)) return null;
-    const [host, manifest, plugin, server] = await Promise.all([
+    const [host, server] = await Promise.all([
       jsonFile(path.join(root, 'package.json')),
-      jsonFile(path.join(frontend, 'manifest.json')),
-      jsonFile(path.join(backend, 'package.json')),
       stat(path.join(root, 'server.js')),
     ]);
     if (host.name?.toLowerCase() !== 'sillytavern' || !server.isFile()) return null;
-    if (manifest.display_name !== '箱装辣白菜' || !manifest.version || !manifest.js) return null;
-    if (plugin.name !== 'boxed-lllllabc-server' || !plugin.version) return null;
-    return { root, frontend, backend, frontendVersion: manifest.version, backendVersion: plugin.version };
+    const inspect = async (relative, metadata, valid) => {
+      const directory = path.join(root, relative);
+      try { await lstat(directory); } catch (error) {
+        return { directory, state: error.code === 'ENOENT' ? 'missing' : 'invalid', detail: error.message };
+      }
+      try {
+        const canonical = await realpath(directory);
+        if (!contains(root, canonical) || !(await stat(canonical)).isDirectory()) throw new Error('目录越出酒馆根目录或不是目录');
+        const pkg = await jsonFile(path.join(canonical, metadata));
+        if (!valid(pkg)) throw new Error('项目名称、版本或入口元数据异常');
+        return { directory: canonical, state: 'installed', version: pkg.version };
+      } catch (error) { return { directory, state: 'invalid', detail: error.message }; }
+    };
+    const [front, back] = await Promise.all([
+      inspect(FRONTEND, 'manifest.json', pkg => pkg.display_name === '箱装辣白菜' && typeof pkg.version === 'string' && pkg.version && pkg.js),
+      inspect(BACKEND, 'package.json', pkg => pkg.name === 'boxed-lllllabc-server' && typeof pkg.version === 'string' && pkg.version),
+    ]);
+    if (contains(front.directory, back.directory) || contains(back.directory, front.directory)) {
+      front.state = back.state = 'invalid';
+      front.detail = back.detail = '前后端目录重叠，已停止相关操作，请人工检查目录链接。';
+    }
+    return { root, frontend: front.directory, backend: back.directory,
+      frontendState: front.state, backendState: back.state,
+      frontendVersion: front.version, backendVersion: back.version,
+      frontendDetail: front.detail, backendDetail: back.detail };
   } catch {
     return null;
   }

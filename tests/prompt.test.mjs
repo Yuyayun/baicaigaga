@@ -5,7 +5,7 @@ import { rename, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { Prompt, run } from '../src/cli.mjs';
-import { temporary, environment, repository, commitVersion, assertTemporaryPath } from './fixtures.mjs';
+import { temporary, environment, repository, commitVersion, assertTemporaryPath, settingsFixture } from './fixtures.mjs';
 
 const ENTER = '\x1b[?1049h';
 const LEAVE = '\x1b[?1049l';
@@ -51,7 +51,7 @@ test('TTY 菜单在有效选择后恢复原终端，再输出操作结果', asyn
   const ui = streams(t);
   ui.output.write('以前的操作记录\n');
   const pending = ui.prompt.menu(() => {
-    ui.output.write('箱装辣白菜测试助手\n1. 切换分支\n0. 退出\n');
+    ui.output.write('箱装小助手\n1. 切换分支\n0. 退出\n');
   }, options);
   await Promise.resolve();
   assert.ok(ui.text().includes(ENTER));
@@ -156,7 +156,7 @@ test('TTY 完整切分支流程：清除两级菜单、保留结果、回车后�
   session.catch(() => {});
   await ui.until('请选择：');
   const firstChoice = ui.text().length;
-  ui.input.write('1\r');
+  ui.input.write('3\r');
   await ui.until('请选择后端分支：', firstChoice);
   await ui.until('请选择：', firstChoice);
   assert.ok(ui.text().indexOf(LEAVE) < ui.text().indexOf('正在检查工作区'));
@@ -168,12 +168,36 @@ test('TTY 完整切分支流程：清除两级菜单、保留结果、回车后�
   assert.equal(ui.text().split(LEAVE).length - 1, 2);
   const returnAt = ui.text().length;
   ui.input.write('\r');
-  await ui.until('分支：test\n版本：1.0.2', returnAt);
+  await ui.until('后端    1.0.2\n  分支    test', returnAt);
   await ui.until('请选择：', returnAt);
-  assert.match(ui.text().slice(returnAt), /箱装辣白菜测试助手[\s\S]*SillyTavern：[\s\S]*前端：[\s\S]*后端：[\s\S]*1\. 切换后端分支/);
+  assert.match(ui.text().slice(returnAt), /箱装小助手[\s\S]*SillyTavern[\s\S]*前端[\s\S]*后端[\s\S]*3  切换后端分支/);
   ui.input.write('0\r');
   await session;
   assert.equal(ui.text().split(ENTER).length - 1, 3);
   assert.equal(ui.text().split(LEAVE).length - 1, 3);
   assert.match(ui.text(), /助手已退出/);
+});
+
+test('TTY 配置 toggle 立即重绘本页，0 返回及 SIGTERM 均恢复终端', async t => {
+  const env = await settingsFixture(t);
+  const ui = streams(t, { createPrompt: false });
+  const session = run({ helper: fileURLToPath(new URL('../', import.meta.url)), home: env.home, cwd: env.home, input: ui.input, output: ui.output });
+  session.catch(() => {});
+  await ui.until('请选择：');
+  ui.input.write('2\r');
+  await ui.until('当前    true（默认）');
+  const before = ui.text().length;
+  ui.input.write('2\r');
+  await ui.until('✓ enableServerPluginsAutoUpdate 已修改为 false', before);
+  await ui.until('当前    false\n', before);
+  await ui.until('请选择：', before);
+  assert.doesNotMatch(ui.text().slice(before), /按回车/);
+  const returning = ui.text().length;
+  ui.input.write('0\r');
+  await ui.until('箱装小助手', returning);
+  await ui.until('请选择：', returning);
+  process.emit('SIGTERM');
+  await session;
+  assert.equal(ui.text().split(ENTER).length, ui.text().split(LEAVE).length);
+  assert.equal(process.listenerCount('SIGTERM'), 0);
 });
