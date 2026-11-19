@@ -6,5 +6,6 @@
   "private": true,
   "engines": { "node": ">=22.14.0" },
   "repository": { "type": "git", "url": "https://github.com/Yuyayun/baicaigaga.git" },
+  "license": "CC-BY-NC-SA-4.0",
   "scripts": { "test": "node --test", "start": "node bin/baicaigaga.mjs" }
 }
