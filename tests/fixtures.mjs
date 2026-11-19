@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, realpath, symlink } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -46,6 +47,15 @@ export async function environment(root) {
   await write(root, `${FRONTEND}/index.js`, '// FRONTEND MUST STAY UNTOUCHED\n');
   await write(root, `${BACKEND}/package.json`, { name: 'boxed-lllllabc-server', version: '1.0.1' });
   return { root, frontend: path.join(root, FRONTEND), backend: path.join(root, BACKEND) };
+}
+
+export async function settingsFixture(t, source = 'port: 8000\n') {
+  const home = await temporary(t);
+  const env = await environment(path.join(home, 'SillyTavern'));
+  await mkdir(path.join(env.root, 'node_modules'));
+  await symlink(path.dirname(createRequire(import.meta.url).resolve('yaml/package.json')), path.join(env.root, 'node_modules/yaml'), process.platform === 'win32' ? 'junction' : 'dir');
+  await write(env.root, 'config.yaml', source);
+  return { ...env, home, file: path.join(env.root, 'config.yaml') };
 }
 
 export async function repository(t, { name = 'boxed-lllllabc-server', root } = {}) {

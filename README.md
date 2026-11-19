@@ -1,28 +1,18 @@
-# 箱装辣白菜测试助手
+# 箱装小助手
 
-`baicaigaga` 是独立的 Node.js 终端工具，用于开发测试时查看环境、安全切换箱装辣白菜 **后端** Git 分支，以及手动更新助手自身。只使用 Node.js 内置模块，无需 `npm install`。
+`baicaigaga` 是箱装辣白菜配套的独立终端管理工具，用于检查环境、安装与管理服务器插件、查看和修改酒馆服务器插件设置、安全切换后端分支，以及检查助手更新。
 
-只有输入命令时才运行。退出菜单、输入结束或按 Ctrl+C 后进程结束，不创建服务、后台进程或定时任务。
+在 Termux 中复制这一条命令即可安装并启动：
 
-## Termux 安装
-
-需要 Node.js 22.14.0 或更新版本，以及支持 `git switch` 的 Git。推荐安装在独立路径：
-
-```bash
-pkg install nodejs-lts git
-mkdir -p "$HOME/.local/share"
-git clone https://github.com/Yuyayun/baicaigaga.git "$HOME/.local/share/baicaigaga"
-node "$HOME/.local/share/baicaigaga/install.mjs"
-baicaigaga
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/Yuyayun/baicaigaga/main/install.sh)"
 ```
 
-安装器在 `$PREFIX/bin/baicaigaga` 写入一个可执行入口，使用当前 Node.js 的绝对路径；无论当前目录在哪里，都可输入 `baicaigaga`。已有同名非助手文件或链接时拒绝覆盖。重复运行安装器可以刷新本助手的入口。
+安装器检查 Node.js 和 Git。Node.js **>= 22.14.0** 就直接使用，已有 Git 不升级；只有依赖缺失或不满足要求时，才显示数字菜单，由你选择安装或退出。不会执行 `pkg upgrade`。需要安装依赖时仅支持 Termux 的 `pkg`，其它环境请先手动准备依赖。
 
-助手源码不能放在前端或后端目录中。配置保存在 `~/.config/baicaigaga/config.json`，源码更新不会覆盖它。移动助手目录后，请从新位置重新执行 `node install.mjs`；更新 Node.js 导致其绝对路径改变时也应重装入口。
+首次安装到 `~/.local/share/baicaigaga`，调用 `install.mjs` 创建命令并自动启动。重复运行安装命令只提供“启动箱装小助手 / 退出”，不会更新、拉取或覆盖已有源码。遇到未知安装目录或命令入口冲突时停止，保留已有内容。命令使用 `sh -c`，让脚本内容与交互输入分开；请保留这一写法。
 
-在普通 Linux 上，未设置 `PREFIX` 时使用 `~/.local/bin/baicaigaga`，需将该目录加入 `PATH`。Windows 开发环境可直接执行 `node bin/baicaigaga.mjs`；Termux 命令入口需在 Termux 本机安装。
-
-## 使用
+## 日常使用
 
 ```text
 baicaigaga
@@ -30,63 +20,105 @@ baicaigaga --version
 baicaigaga --help
 ```
 
-启动会显示 SillyTavern、前端、后端的绝对路径、前后端版本、后端分支及工作区状态。
+主菜单：
 
 ```text
-1. 切换后端分支
-2. 更新测试助手
-3. 重新定位 SillyTavern
-0. 退出
+1  安装 / 管理服务器插件
+2  酒馆服务器插件设置
+3  切换后端分支
+4  检查助手更新
+5  重新定位 SillyTavern
+
+0  退出
 ```
 
-交互终端中的完整状态与主菜单、分支选择菜单使用临时屏幕显示。提交有效选择后，菜单与“请选择：”一起消失，恢复原终端并输出操作进度、结果或错误。结果会停留到按回车后，再重新读取状态、绘制完整主菜单；分支菜单选择 `0` 则直接返回主菜单。退出、输入结束或 Ctrl+C 时也会恢复原终端。中文、长分支名、菜单换行和终端尺寸变化无需按行数手动清除。
+启动只检查和显示状态。任何安装、配置修改、分支切换或源码更新，都由你主动按数字触发。助手只在调用期间运行，退出后进程结束，不创建服务、后台进程或定时任务。
 
-只有输入、输出均为 TTY 且终端不是 `TERM=dumb` 时才启用临时界面及回车等待。管道、重定向和自动测试仍输出普通文本，不发送终端控制字符，也不增加额外输入。交互仍使用 Node.js 内置 `readline`，没有新增依赖。
+## 功能说明
 
-第一次定位依次检查当前目录及父目录、HOME 中的常见路径，并在 HOME 下最多三层、240 个目录、3000 个目录条目内查找。跳过隐藏目录、`node_modules`、`storage` 等大目录，不跟随浅层查找中的目录链接，不遍历设备存储。常见路径包括 `~/SillyTavern`、`~/sillytavern`、`~/st/SillyTavern`、`~/apps/SillyTavern`、`~/.local/share/SillyTavern`。
+### 定位酒馆与查看状态
 
-候选必须包含 SillyTavern 的 `package.json`（名称为 `sillytavern`）与 `server.js`，并通过以下两个目录的元数据检查：
+首次启动依次检查当前目录及父目录、HOME 常见路径和有限的浅层候选目录。一个有效候选会自动保存；多个候选由你选择；没有找到时可手动输入根目录，支持 `~`、空格及外层引号。输入 `0` 可跳过定位，仍可检查助手更新。取消重新定位会保留原配置。
 
-- `public/scripts/extensions/third-party/boxed-lllllabc`：`manifest.json` 的显示名称为“箱装辣白菜”，含版本及入口信息。
-- `plugins/boxed-lllllabc-server`：`package.json` 名称为 `boxed-lllllabc-server`，含版本信息。
+SillyTavern 本体只需根目录可访问、`package.json` 名称为 `sillytavern` 且存在 `server.js`。前后端分别显示已安装、未安装或异常，缺少任何一端都不妨碍定位酒馆。
 
-只有一个有效候选时自动确认并保存；多个候选时选择；没有找到时可手动输入根目录，支持 `~`、空格及外层引号。输入 `0` 可跳过定位，仍能使用助手更新菜单。以后优先使用已保存的有效路径。酒馆移动后选择“重新定位 SillyTavern”；取消重新定位会保留原配置。
+- 前端：`public/scripts/extensions/third-party/boxed-lllllabc`，只读取元数据，不安装或修改。
+- 后端：`plugins/boxed-lllllabc-server`，显示版本、Git 分支和工作区状态。
 
-## 切换后端分支
+路径配置保存在 `~/.config/baicaigaga/config.json`，源码更新不会覆盖它。自动搜索最多三层、240 个目录、3000 个条目，跳过隐藏目录、`node_modules`、`storage`、数据和备份目录，不跟随浅层搜索中的目录链接。
 
-1. 确认后端是独立 Git 仓库根目录，且 `origin` 配置指向 `Yuyayun/boxed-lllllabc-server`，支持 GitHub HTTPS 与 SSH 地址。
-2. 检查暂存、未暂存、未跟踪文件及子模块状态。发现修改时列出状态并停止，连 fetch 都不会执行。未完成的合并、变基、拣选、二分查找、索引锁，以及隐藏工作区修改的文件标记也会阻止操作。
-3. 按需 fetch `origin` 的分支，清理已删除的远端跟踪引用。不会把 fetch 目标设为本地分支。
-4. 列出本地分支与 `origin` 远端分支，标明当前分支和仅存在于远端的分支。
-5. 选择后再次检查状态。已有本地分支直接使用；只有远端分支时建立同名本地 tracking branch。本地分支已有上游时使用其 `origin` 上游；上游已删除时保留并切换本地分支、给出提示；跟踪其他远端时停止操作。
-6. 在切换前检查目标元数据和提交历史。远端领先时只允许 fast-forward；分叉时保留原分支并停止。本地领先的提交会保留并提示。只有本地的分支仍可切换。
-7. 保护可能被目标分支覆盖的 Git 忽略文件，禁用 Git hooks、自动 stash 与递归子模块更新。切换后核对分支、实际提交、版本和干净状态。
+### 安装 / 管理服务器插件
 
-成功后手动重启 SillyTavern 再测试。测试结束再次运行助手，选择 `main` 即可恢复正式分支，不需要单独的测试模式。
+未安装时进入管理页，按 `1` 才会从 `https://github.com/Yuyayun/boxed-lllllabc-server.git` 的 `main` 分支安装。已有目标目录（包括空目录、未知内容及异常仓库）不会被自动覆盖、删除或重装。
 
-分支列表中的 `origin` 是助手支持的唯一操作远端；本地仓库自己的 Git URL 重写和认证配置仍由 Git 处理。后端需为独立克隆或独立 Git 工作树，不能只是 SillyTavern 上层仓库中的普通目录。
+安装成功后校验版本、分支和工作区。若酒馆未启用服务器插件，只显示提示，由你进入设置页修改。安装失败时保留现场；不完整目录需要人工检查后再处理。没有内置代理、镜像或全局 Git 配置修改。
 
-## 更新助手自身
+### 酒馆服务器插件设置
 
-只在主动选择菜单 `2` 时执行：确认助手是 `Yuyayun/baicaigaga` 的 Git 安装、位于 `main` 且工作区干净，再 fetch 并比较当前提交、版本与 `origin/main`。即使版本号相同，存在新提交时也会快进更新；提交完全相同时显示“当前已是最新版本”。
+设置页显示 `config.yaml` 中的两个布尔值，未显式设置的值标注“默认”：
 
-工作区有修改、未发布的本地提交、分叉、开发分支、游离 HEAD 或非 Git 安装均会拒绝自动更新。更新成功后当前进程立即退出，请重新输入 `baicaigaga` 使用新版。
+| 设置 | 作用 | 缺失时的默认值 |
+| --- | --- | --- |
+| `enableServerPlugins` | 允许酒馆加载服务器插件 | `false` |
+| `enableServerPluginsAutoUpdate` | 允许酒馆启动时自动检查并更新 Git 安装的服务器插件 | `true` |
 
-网络、权限或 Git 操作失败时给出中文说明，保留诊断信息并停止该操作。fetch 已取得的远端跟踪引用不会自动撤销；如果切换成功后快进步骤因权限、磁盘等异常失败，保留当时的 Git 状态并显示当前状态，不执行自动回滚、覆盖或历史改写。不要在助手操作期间并行操作同一个仓库。
+两者独立；自动更新开关不决定插件是否加载。默认值与含义依据 [SillyTavern 插件加载器](https://github.com/SillyTavern/SillyTavern/blob/release/src/plugin-loader.js)。表格表示配置文件及默认值；使用自定义 `--configPath` 或环境变量覆盖的部署，请在相应启动环境中管理配置。
 
-## 安全范围
+按 `1` 或 `2` 直接切换对应值，写入校验成功后立即刷新本页，没有第二层确认。修改后通常需要手动重启 SillyTavern。
 
-助手仅读取前端元数据，不对前端执行 Git 或文件修改。它不读取或修改聊天数据库、备份数据库或备份位置，不启动、停止、终止或重启 SillyTavern，也不安装其依赖。
+配置解析复用该酒馆已安装的 `yaml` 库，无需给助手安装运行依赖。修改仅替换目标布尔值或追加目标行，保留其它内容、注释、换行和文件权限，通过临时文件原子替换。解析失败、重复字段、非布尔值、共享锚点或不能保留格式的结构会停止修改；酒馆依赖不完整时会明确提示。
 
-助手不会自动 stash、reset、clean、强制切换、强制覆盖、处理分叉或自动重启。配置与命令入口只在定位保存、安装等明确操作时写入。没有启动自动更新、后台更新、守护进程或定时任务。
+### 安全切换后端分支
 
-## 开发与验证
+切换前确认后端是独立 Git 仓库根目录，且 `origin` 指向 `Yuyayun/boxed-lllllabc-server`，支持官方 HTTPS 和 SSH 地址。检查暂存、未暂存、未跟踪文件、子模块、未完成 Git 操作和隐藏修改标记；有异常时停止，工作区有修改时连 fetch 都不执行。
 
-```bash
+获取 `origin` 分支后列出本地及远端分支。远端分支可建立同名本地跟踪分支，已有分支按其 `origin` 上游更新。远端领先时只允许 fast-forward；分叉会停止，本地领先的提交会保留，已删除上游的本地分支仍可切换并提示。保护可能被目标分支覆盖的忽略文件，禁用 Git hooks、自动 stash 和递归子模块更新；切换后核对分支、提交、版本与干净状态。
+
+助手不会自动 stash、reset、clean、强制切换、覆盖或自动回滚。不要在助手操作期间并行操作同一仓库。完成后由你手动重启酒馆；再次选择 `main` 可回到正式分支。
+
+### 检查助手更新
+
+主菜单 `4` 仅检查：确认助手是 `Yuyayun/baicaigaga` 的 Git 安装、处于 `main` 且工作区干净，然后只读查询远端提交。没有新版时不执行 fetch、不写本地文件，只提供返回；发现远端提交不同后，才 fetch Git 元数据以比较历史和版本，源码及当前分支仍不改变。有新提交时显示“更新到版本”，再按 `1` 才执行快进更新。版本号相同但存在新提交时也可更新。
+
+确认前会再次检查工作区与引用，拒绝本地修改、未发布提交、分叉、开发分支、游离 HEAD、非 Git 安装和忽略文件冲突。更新成功后清理当前交互状态，自动启动新版助手，无需重新输入命令。
+
+## 手动安装 / 开发者安装
+
+需要 Node.js >= 22.14.0 和支持 `git switch` 的 Git。准备好依赖后：
+
+```sh
+mkdir -p "$HOME/.local/share"
+git clone --branch main https://github.com/Yuyayun/baicaigaga.git "$HOME/.local/share/baicaigaga"
+node "$HOME/.local/share/baicaigaga/install.mjs"
+baicaigaga
+```
+
+`install.mjs` 只创建命令入口，不获取源码或安装依赖；一键安装器负责首次安装后的自动启动。Termux 入口位于 `$PREFIX/bin/baicaigaga`，使用当前 Node.js 的绝对路径。普通 Linux 未设置 `PREFIX` 时写入 `~/.local/bin/baicaigaga`，请将其加入 `PATH`。Windows 开发环境直接运行 `node bin/baicaigaga.mjs`。
+
+助手及命令入口应独立于箱装前后端目录。移动助手目录或更换 Node.js 路径后，重新运行 `node install.mjs` 刷新入口；不属于助手的同名文件或链接会拒绝覆盖。
+
+## 终端与安全范围
+
+主菜单和子菜单统一排版，长路径独立显示。输入、输出均为 TTY 且 `TERM` 不是 `dumb` 时使用临时屏幕；有效选择后菜单消失，回到正常终端显示操作结果。普通结果按回车返回主菜单，子菜单 `0` 直接返回。EOF、Ctrl+C 和 SIGTERM 会恢复终端。非 TTY 输出确定性的纯文本，不发临时屏幕控制字符，不增加回车等待。
+
+助手不安装前端，不读取或修改聊天数据库、备份数据库或备份位置，不启动或重启 SillyTavern，不改代理、不自动安装后端、不自动改酒馆配置，也不在启动时更新自身。
+
+## 开发测试
+
+```sh
+npm ci --ignore-scripts
 npm test
-node bin/baicaigaga.mjs --version
+node bin/baicaigaga.mjs --help
 ```
 
-测试使用系统临时目录中的独立 Git 仓库与离线远端，不连接生产酒馆，不操作真实聊天或备份数据。集成测试覆盖环境确认、路径配置、候选数量和深度限制、远端跟踪分支、快进、分叉、修改保护、忽略文件保护及自更新。
+开发依赖 `yaml` 只供测试构建模拟酒馆，正常使用助手无需 `npm install`。测试使用系统临时目录和离线 Git 远端，不连接生产酒馆。CI 覆盖 Linux / Windows 与 Node.js 22 / 24。
 
-Termux 本机验收：安装入口后从 HOME 和任意其他目录分别启动；确认实际酒馆路径；切换测试分支后手动重启并测试；再切回 `main`。退出后确认返回 shell。开发机的模拟测试不能代替设备上的这一步。
+Termux 真机仍需验收：复制一键命令、检查依赖交互、从任意目录启动、配置切换、安装后端、切换分支及更新后重启。桌面模拟测试不能代替这一步。
+
+## 许可
+
+作者：**辣白菜 / labaicai0969**。
+
+本项目采用 [CC BY-NC-SA 4.0](LICENSE) 许可：允许在署名、非商业的前提下使用、修改与分享；公开分享改编或衍生作品时，应继续采用 CC BY-NC-SA 4.0。完整授权范围以 LICENSE 正文为准。
+
+本许可自首次加入 `LICENSE` 的提交起适用。

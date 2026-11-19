@@ -9,6 +9,16 @@ const MARKER = '# baicaigaga managed command v1';
 const quote = value => `'${value.replace(/'/g, `'"'"'`)}'`;
 
 async function rejectPluginLocation(directory) {
+  // Resolve existing ancestors too, so a not-yet-created bin directory cannot
+  // bypass the boundary through a symlink in PREFIX or HOME.
+  let ancestor = path.resolve(directory);
+  for (;;) {
+    try { directory = path.join(await realpath(ancestor), path.relative(ancestor, path.resolve(directory))); break; }
+    catch (error) {
+      if (error.code !== 'ENOENT' || path.dirname(ancestor) === ancestor) throw error;
+      ancestor = path.dirname(ancestor);
+    }
+  }
   for (let current = directory;; current = path.dirname(current)) {
     let pkg;
     try { pkg = await jsonFile(path.join(current, 'package.json')); } catch { /* Not a package directory. */ }
@@ -46,7 +56,7 @@ export async function install({ helper = fileURLToPath(new URL('./', import.meta
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
     const result = await install();
-    console.log(`✓ 已安装命令：${result.launcher}\n\n请输入：\nbaicaigaga`);
+    console.log(`✓ 箱装小助手安装完成\n✓ 已创建命令：${result.launcher}`);
     if (result.needsPath) console.log(`\n请确认 ${result.bin} 已加入 PATH。`);
   } catch (error) {
     console.error(describe(error));

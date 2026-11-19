@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, rename, symlink } from 'node:fs/promises';
+import { readFile, rename, symlink, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { temporary, environment, write } from './fixtures.mjs';
+import { temporary, environment, write, assertTemporaryPath } from './fixtures.mjs';
 import { discover, inspectEnvironment, saveConfig, readConfig, configPath, expandHome, assertIndependent, FRONTEND, BACKEND } from '../src/environment.mjs';
 import { locate } from '../src/cli.mjs';
 
@@ -18,15 +18,15 @@ test('通过酒馆及前后端元数据确认候选，前端文件内容保留',
   assert.equal(await readFile(file, 'utf8'), before);
 });
 
-test('同名普通目录、缺少前后端及损坏元数据均拒绝', async t => {
+test('酒馆本体独立识别，后端元数据异常不使酒馆失效', async t => {
   const base = await temporary(t);
   await write(base, 'SillyTavern/package.json', { name: 'ordinary-directory' });
   assert.equal(await inspectEnvironment(path.join(base, 'SillyTavern')), null);
   const env = await environment(path.join(base, 'valid'));
   await write(env.root, `${BACKEND}/package.json`, { name: 'unrelated', version: '1' });
-  assert.equal(await inspectEnvironment(env.root), null);
+  assert.equal((await inspectEnvironment(env.root)).backendState, 'invalid');
   await write(env.root, `${BACKEND}/package.json`, '{broken');
-  assert.equal(await inspectEnvironment(env.root), null);
+  assert.equal((await inspectEnvironment(env.root)).backendState, 'invalid');
 });
 
 test('从当前目录及父目录定位，HOME 搜索深度有限', async t => {
@@ -128,4 +128,17 @@ test('HOME 浅层遍历不跟随指向其他位置的目录链接', async t => {
   try { await symlink(outside, path.join(base, 'linked'), process.platform === 'win32' ? 'junction' : 'dir'); }
   catch (error) { if (error.code === 'EPERM') { t.skip('此设备不允许创建目录链接'); return; } throw error; }
   assert.deepEqual(await discover({ cwd: base, home: base }), []);
+});
+
+test('前后端通过链接重叠时标记异常，保留酒馆本体识别', async t => {
+  const home = await temporary(t);
+  const env = await environment(path.join(home, 'SillyTavern'));
+  assertTemporaryPath(env.backend, home);
+  await rm(env.backend, { recursive: true });
+  await write(env.frontend, 'package.json', { name: 'boxed-lllllabc-server', version: '1.0.0' });
+  await symlink(env.frontend, env.backend, process.platform === 'win32' ? 'junction' : 'dir');
+  const current = await inspectEnvironment(env.root);
+  assert.equal(current.root, env.root);
+  assert.equal(current.backendState, 'invalid');
+  assert.equal(current.frontendState, 'invalid');
 });

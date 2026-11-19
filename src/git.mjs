@@ -209,24 +209,41 @@ export async function switchBranch(directory, selection) {
   return { ...result, version, ahead: state === 'ahead', missingUpstream: Boolean(local?.upstream && !upstream) };
 }
 
-export async function updateHelper(directory) {
+export async function checkHelperUpdate(directory) {
   await validateRepository(directory, HELPER_REPOSITORY);
   await ensureReady(directory);
   if (await currentBranch(directory) !== 'main') throw new UserError('助手自身必须位于 main 正式分支才能自动更新，请自行确认分支后重试。');
+  const head = await output(directory, ['rev-parse', 'HEAD']);
+  const currentVersion = await checkTargetPackage(directory, head, 'baicaigaga');
+  // ls-remote does not write FETCH_HEAD or remote-tracking refs. In the common
+  // already-current case, checking must not modify any local files at all.
+  const advertised = await output(directory, ['ls-remote', '--heads', 'origin', 'refs/heads/main'], '检查助手远端失败，请检查 GitHub 网络连接与仓库访问权限。');
+  const match = /^([0-9a-f]{40,64})\trefs\/heads\/main$/i.exec(advertised);
+  if (!match) throw new UserError('助手远端缺少 main 正式分支，已停止。');
+  if (match[1] === head) return { available: false, currentVersion, remoteVersion: currentVersion, head, remoteOid: head };
   await fetchOrigin(directory);
   const remote = (await refs(directory)).find(item => item.ref === 'refs/remotes/origin/main');
   if (!remote) throw new UserError('助手远端缺少 main 正式分支，已停止。');
-  const head = await output(directory, ['rev-parse', 'HEAD']);
-  const currentVersion = (await jsonFile(path.join(directory, 'package.json'))).version;
   const remoteVersion = await checkTargetPackage(directory, remote.oid, 'baicaigaga');
   const state = await relation(directory, head, remote.oid);
   if (state === 'ahead') throw new UserError('助手本地包含尚未发布到 origin/main 的提交，已停止。请自行检查。');
-  if (state === 'equal') return { updated: false, currentVersion, remoteVersion };
-  await protectIgnoredFiles(directory, remote.oid);
+  return { available: state === 'behind', currentVersion, remoteVersion, head, remoteOid: remote.oid };
+}
+
+export async function updateHelper(directory, checked = undefined) {
+  const plan = checked ?? await checkHelperUpdate(directory);
+  await validateRepository(directory, HELPER_REPOSITORY);
   await ensureReady(directory);
-  if (await currentBranch(directory) !== 'main' || await output(directory, ['rev-parse', 'HEAD']) !== head) throw new UserError('更新前助手分支发生变化，已停止。');
-  await git(directory, ['merge', '--ff-only', '--no-edit', remote.oid], '助手快进更新失败，已停止。请检查工作区。');
+  if (await currentBranch(directory) !== 'main' || await output(directory, ['rev-parse', 'HEAD']) !== plan.head ||
+      (plan.available && await output(directory, ['rev-parse', 'refs/remotes/origin/main']) !== plan.remoteOid)) throw new UserError('检查后助手分支或远端引用发生变化，请重新检查更新。');
+  const state = await relation(directory, plan.head, plan.remoteOid);
+  if (state === 'ahead') throw new UserError('助手本地包含尚未发布的提交，已停止。');
+  const currentVersion = await checkTargetPackage(directory, plan.head, 'baicaigaga');
+  const remoteVersion = await checkTargetPackage(directory, plan.remoteOid, 'baicaigaga');
+  if (state === 'equal') return { updated: false, currentVersion, remoteVersion };
+  await protectIgnoredFiles(directory, plan.remoteOid);
+  await git(directory, ['merge', '--ff-only', '--no-edit', plan.remoteOid], '助手快进更新失败，已停止。请检查工作区。');
   const result = await repositoryStatus(directory, HELPER_REPOSITORY);
-  if (result.branch !== 'main' || result.changes.length || await output(directory, ['rev-parse', 'HEAD']) !== remote.oid) throw new UserError('助手更新后的状态与预期不符，请自行检查。');
+  if (result.branch !== 'main' || result.changes.length || await output(directory, ['rev-parse', 'HEAD']) !== plan.remoteOid) throw new UserError('助手更新后的状态与预期不符，请自行检查。');
   return { updated: true, currentVersion, remoteVersion };
 }

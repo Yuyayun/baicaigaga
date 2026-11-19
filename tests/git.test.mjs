@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, mkdir, chmod } from 'node:fs/promises';
 import path from 'node:path';
 import { repository, command, commitVersion, write } from './fixtures.mjs';
-import { listBranches, switchBranch, updateHelper, validateRepository, worktreeStatus, repositoryName, BACKEND_REPOSITORY, git, withGitSignal } from '../src/git.mjs';
+import { listBranches, switchBranch, checkHelperUpdate, updateHelper, validateRepository, worktreeStatus, repositoryName, BACKEND_REPOSITORY, git, withGitSignal } from '../src/git.mjs';
 
 const head = work => command(work, 'rev-parse', 'HEAD');
 const branch = work => command(work, 'branch', '--show-current');
@@ -173,7 +173,32 @@ test('删除的远端分支不再列出，本地分支仍保留', async t => {
 
 test('助手无更新时报告最新版本', async t => {
   const repo = await repository(t, { name: 'baicaigaga' });
+  const fetchHead = path.join(repo.work, '.git', 'FETCH_HEAD');
+  const before = await readFile(fetchHead, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   assert.deepEqual(await updateHelper(repo.work), { updated: false, currentVersion: '1.0.0', remoteVersion: '1.0.0' });
+  assert.equal(await readFile(fetchHead, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; }), before);
+});
+
+test('检查更新只获取计划，不改源码；确认前新增修改会阻止更新', async t => {
+  const repo = await repository(t, { name: 'baicaigaga' });
+  const before = head(repo.work);
+  await commitVersion(repo, 'main', '1.1.0');
+  const checked = await checkHelperUpdate(repo.work);
+  assert.equal(checked.available, true);
+  assert.equal(head(repo.work), before);
+  assert.equal(JSON.parse(await readFile(path.join(repo.work, 'package.json'), 'utf8')).version, '1.0.0');
+  await write(repo.work, 'plugin.mjs', 'KEEP EDITS\n');
+  await assert.rejects(updateHelper(repo.work, checked), /未提交修改/);
+  assert.equal(head(repo.work), before);
+});
+
+test('检查后远端跟踪引用改变时拒绝使用过期更新计划', async t => {
+  const repo = await repository(t, { name: 'baicaigaga' });
+  await commitVersion(repo, 'main', '1.1.0');
+  const checked = await checkHelperUpdate(repo.work);
+  command(repo.work, 'update-ref', 'refs/remotes/origin/main', head(repo.work));
+  await assert.rejects(updateHelper(repo.work, checked), /引用发生变化/);
+  assert.equal(head(repo.work), checked.head);
 });
 
 test('助手更新只快进到正式 main，重新读取版本', async t => {
